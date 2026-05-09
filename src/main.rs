@@ -1,9 +1,13 @@
 use anyhow::{Context, Result};
 use clap::Parser;
 use crossterm::{
+    cursor::MoveTo,
     event::{self, Event, KeyCode, KeyEventKind},
     execute,
-    terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
+    terminal::{
+        Clear, ClearType, EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode,
+        enable_raw_mode,
+    },
 };
 use ratatui::{
     prelude::*,
@@ -70,7 +74,7 @@ fn main() -> Result<()> {
     enable_raw_mode()?;
 
     let mut stdout = io::stdout();
-    execute!(stdout, EnterAlternateScreen)?;
+    execute!(stdout, EnterAlternateScreen, Clear(ClearType::All))?;
 
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
@@ -78,7 +82,12 @@ fn main() -> Result<()> {
     let result = run_app(&mut terminal, App::new(entries), args.print);
 
     disable_raw_mode()?;
-    execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
+    execute!(
+        terminal.backend_mut(),
+        LeaveAlternateScreen,
+        Clear(ClearType::All),
+        MoveTo(0, 0)
+    )?;
     terminal.show_cursor()?;
 
     result
