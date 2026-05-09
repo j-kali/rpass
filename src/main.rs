@@ -127,12 +127,12 @@ fn run_app(
                 KeyCode::Enter => match &app.mode {
                     Mode::Select => {
                         if let Some(entry) = app.filtered.get(app.selected) {
-                            let password = get_password(entry)?;
+                            let secret = get_secret(entry)?;
 
                             if print_only {
-                                app.mode = Mode::Show(password);
+                                app.mode = Mode::Show(secret);
                             } else {
-                                copy_pass(entry)?;
+                                pass_to_clipboard(secret)?;
                                 break;
                             }
                         }
@@ -232,7 +232,7 @@ fn strip_store_prefix(path: &Path) -> Result<String> {
     Ok(relative.to_string_lossy().to_string())
 }
 
-fn get_password(entry: &str) -> Result<String> {
+fn get_secret(entry: &str) -> Result<String> {
     let output = Command::new("pass")
         .arg("show")
         .arg(entry)
@@ -246,8 +246,15 @@ fn get_password(entry: &str) -> Result<String> {
     Ok(String::from_utf8_lossy(&output.stdout).to_string())
 }
 
-fn copy_pass(entry: &str) -> Result<()> {
-    let password = get_password(entry)?;
+fn pass_to_clipboard(secret: String) -> Result<()> {
+    let filtered = secret
+        .lines()
+        .filter(|line| {
+            let trimmed = line.trim();
+            !trimmed.is_empty() && !trimmed.starts_with('#')
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
 
     let mut wl_copy = Command::new("wl-copy")
         .stdin(Stdio::piped())
@@ -260,7 +267,7 @@ fn copy_pass(entry: &str) -> Result<()> {
         .stdin
         .as_mut()
         .unwrap()
-        .write_all(password.as_bytes())?;
+        .write_all(filtered.as_bytes())?;
 
     wl_copy.wait()?;
 
