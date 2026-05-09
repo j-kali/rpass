@@ -1,4 +1,5 @@
 use anyhow::{Context, Result};
+use clap::Parser;
 use crossterm::{
     event::{self, Event, KeyCode, KeyEventKind},
     execute,
@@ -15,11 +16,21 @@ use std::{
 };
 use walkdir::WalkDir;
 
+#[derive(Parser)]
+struct Args {
+    #[arg(short, long)]
+    print: bool,
+}
+enum Mode {
+    Select,
+    Show(String),
+}
 struct App {
     entries: Vec<String>,
     filtered: Vec<String>,
     selected: usize,
     search: String,
+    mode: Mode,
 }
 
 impl App {
@@ -29,6 +40,7 @@ impl App {
             entries,
             selected: 0,
             search: String::new(),
+            mode: Mode::Select,
         }
     }
 
@@ -52,6 +64,7 @@ impl App {
 }
 
 fn main() -> Result<()> {
+    let args = Args::parse();
     let entries = load_pass_entries()?;
 
     enable_raw_mode()?;
@@ -62,7 +75,7 @@ fn main() -> Result<()> {
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
-    let result = run_app(&mut terminal, App::new(entries));
+    let result = run_app(&mut terminal, App::new(entries), args.print);
 
     disable_raw_mode()?;
     execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
@@ -71,7 +84,11 @@ fn main() -> Result<()> {
     result
 }
 
-fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, mut app: App) -> Result<()> {
+fn run_app(
+    terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
+    mut app: App,
+    print_only: bool,
+) -> Result<()> {
     loop {
         terminal.draw(|f| ui(f, &app))?;
 
@@ -107,12 +124,24 @@ fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, mut app: App) 
                     }
                 }
 
-                KeyCode::Enter => {
-                    if let Some(entry) = app.filtered.get(app.selected) {
-                        copy_pass(entry)?;
+                KeyCode::Enter => match &app.mode {
+                    Mode::Select => {
+                        if let Some(entry) = app.filtered.get(app.selected) {
+                            let password = get_password(entry)?;
+
+                            if print_only {
+                                app.mode = Mode::Show(password);
+                            } else {
+                                copy_pass(entry)?;
+                                break;
+                            }
+                        }
+                    }
+
+                    Mode::Show(_) => {
                         break;
                     }
-                }
+                },
 
                 KeyCode::Esc => break,
 
@@ -125,6 +154,21 @@ fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, mut app: App) 
 }
 
 fn ui(f: &mut Frame, app: &App) {
+    match &app.mode {
+        Mode::Show(password) => {
+            let block = Paragraph::new(password.as_str()).block(
+                Block::default()
+                    .title("Password (press Enter to exit)")
+                    .borders(Borders::ALL),
+            );
+
+            f.render_widget(block, f.size());
+            return;
+        }
+
+        Mode::Select => {}
+    }
+
     let layout = Layout::default()
         .direction(Direction::Vertical)
         .constraints([Constraint::Length(3), Constraint::Min(1)])
@@ -188,7 +232,7 @@ fn strip_store_prefix(path: &Path) -> Result<String> {
     Ok(relative.to_string_lossy().to_string())
 }
 
-fn copy_pass(entry: &str) -> Result<()> {
+fn get_password(entry: &str) -> Result<String> {
     let output = Command::new("pass")
         .arg("show")
         .arg(entry)
@@ -199,8 +243,11 @@ fn copy_pass(entry: &str) -> Result<()> {
         anyhow::bail!("pass command failed");
     }
 
-    let secret = String::from_utf8_lossy(&output.stdout);
-    let password = secret.lines().next().unwrap_or("");
+    Ok(String::from_utf8_lossy(&output.stdout).to_string())
+}
+
+fn copy_pass(entry: &str) -> Result<()> {
+    let password = get_password(entry)?;
 
     let mut wl_copy = Command::new("wl-copy")
         .stdin(Stdio::piped())
