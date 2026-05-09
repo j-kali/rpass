@@ -35,16 +35,18 @@ struct App {
     selected: usize,
     search: String,
     mode: Mode,
+    print_mode: bool,
 }
 
 impl App {
-    fn new(entries: Vec<String>) -> Self {
+    fn new(entries: Vec<String>, print_mode: bool) -> Self {
         Self {
             filtered: entries.clone(),
             entries,
             selected: 0,
             search: String::new(),
             mode: Mode::Select,
+            print_mode: print_mode,
         }
     }
 
@@ -79,7 +81,7 @@ fn main() -> Result<()> {
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
-    let result = run_app(&mut terminal, App::new(entries), args.print);
+    let result = run_app(&mut terminal, App::new(entries, args.print));
 
     disable_raw_mode()?;
     execute!(
@@ -93,11 +95,7 @@ fn main() -> Result<()> {
     result
 }
 
-fn run_app(
-    terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
-    mut app: App,
-    print_only: bool,
-) -> Result<()> {
+fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, mut app: App) -> Result<()> {
     loop {
         terminal.draw(|f| ui(f, &app))?;
 
@@ -133,12 +131,14 @@ fn run_app(
                     }
                 }
 
+                KeyCode::Tab => app.print_mode = !app.print_mode,
+
                 KeyCode::Enter => match &app.mode {
                     Mode::Select => {
                         if let Some(entry) = app.filtered.get(app.selected) {
                             let secret = get_secret(entry)?;
 
-                            if print_only {
+                            if app.print_mode {
                                 app.mode = Mode::Show(secret);
                             } else {
                                 pass_to_clipboard(secret)?;
@@ -148,7 +148,7 @@ fn run_app(
                     }
 
                     Mode::Show(_) => {
-                        break;
+                        app.mode = Mode::Select;
                     }
                 },
 
@@ -183,10 +183,30 @@ fn ui(f: &mut Frame, app: &App) {
         .constraints([Constraint::Length(3), Constraint::Min(1)])
         .split(f.size());
 
+    let mode_label = if app.print_mode {
+        "[PRINT]"
+    } else {
+        "[CLIPBOARD]"
+    };
+
     let search = Paragraph::new(app.search.as_str())
         .block(Block::default().title("Search").borders(Borders::ALL));
 
     f.render_widget(search, layout[0]);
+
+    let area = layout[0];
+
+    let x = area.x + area.width.saturating_sub(mode_label.len() as u16 + 2);
+
+    f.render_widget(
+        Paragraph::new(mode_label),
+        Rect {
+            x,
+            y: area.y,
+            width: mode_label.len() as u16,
+            height: 1,
+        },
+    );
 
     let items: Vec<ListItem> = app
         .filtered
